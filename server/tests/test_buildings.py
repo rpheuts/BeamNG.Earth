@@ -613,6 +613,43 @@ class BridgePassageTest(unittest.TestCase):
         R3, *_ = bld._passages([ring], [{"bridge_masonry": "stone", "height": 10.0}], ["k"], [47.0], road)
         self.assertEqual(len(R3), 1)
 
+    def test_unmapped_bridge_pier_clamped_below_deck(self):
+        """A bridge pier with unmapped height (defaulting to BRIDGE_PIER_M = 12m) under a 10.5m deck (Deventer)
+        is clamped below the bridge deck underside (9.0m) and does not poke through the floor."""
+        road = [np.array([[0.0, -50.0], [0.0, 50.0]])]
+        deck = [(road[0], np.array([10.5, 10.5]))]
+        pier = np.array([[0.0, -1.0], [2.0, -1.0], [2.0, 1.0], [0.0, 1.0], [0.0, -1.0]], float)
+        R, A, L, M = bld._passages([pier], [{"class": "bridge_structure"}], [None], [0.0], road, deck, lambda c: 0.0)
+        self.assertEqual(len(R), 1)
+        self.assertEqual(A[0]["height"], 9.0)
+        self.assertEqual(M[0], 0.0)
+
+    def test_offset_building_in_wide_bridge_corridor(self):
+        """A building offset from centerline (e.g. 7m away on a 20m wide bridge) is within the corridor
+        and clamped/cut rather than ignored."""
+        road = [np.array([[0.0, -50.0], [0.0, 50.0]])]
+        deck_wide = [(road[0], np.array([12.0, 12.0]), 20.0)]
+        bld_offset = np.array([[6.0, -5.0], [10.0, -5.0], [10.0, 5.0], [6.0, 5.0], [6.0, -5.0]], float)
+        R, A, *_ = bld._passages([bld_offset], [{"height": 15.0}], [None], [0.0], None, deck_wide, lambda c: 3.0)
+        self.assertEqual(len(R), 1)
+        self.assertEqual(A[0]["height"], 7.5)
+
+    def test_low_bridge_approach_ramp_cleared(self):
+        """A building intersecting a low approach ramp (dh = 1.8m) is completely cleared from the corridor."""
+        road = [np.array([[0.0, -50.0], [0.0, 50.0]])]
+        deck_low = [(road[0], np.array([1.8, 1.8]))]
+        ring = np.array([[-3.0, -3.0], [3.0, -3.0], [3.0, 3.0], [-3.0, 3.0], [-3.0, -3.0]], float)
+        R, *_ = bld._passages([ring], [{"height": 10.0}], [None], [0.0], road, deck_low, lambda c: 0.0)
+        self.assertEqual(len(R), 0)
+
+    def test_bridge_classes_exclude_piers_from_collider_boxes(self):
+        """bridge_pier and bridge_part are in BRIDGE_CLASSES and excluded from collider_boxes."""
+        self.assertIn("bridge_structure", bld.BRIDGE_CLASSES)
+        self.assertIn("bridge_pier", bld.BRIDGE_CLASSES)
+        self.assertIn("bridge_part", bld.BRIDGE_CLASSES)
+        pier_spec = bld.plan(np.array([[0, 0], [4, 0], [4, 4], [0, 4]]), {"class": "bridge_pier", "height": 10.0})
+        self.assertEqual(bld.collider_boxes([(pier_spec, 0.0, 0.0)], 0.0, 0.0), [])
+
 
 class MachineLearnedFootprintTest(unittest.TestCase):
     """Microsoft's machine-learned footprints on a road bridge or on water are its deck or a boat (Tower Bridge's

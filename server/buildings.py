@@ -159,7 +159,7 @@ BANDS = 4
 
 # Overture "bridge_structure" (OSM man_made=bridge parts with a height: the Queensboro Bridge's towers, 110 m) was a
 # glass tower the decks ran through (the user's report, 2026-10-17)
-BRIDGE_CLASSES = {"bridge_structure"}
+BRIDGE_CLASSES = {"bridge_structure", "bridge_pier", "bridge_part"}
 BRIDGE_PIER_M = 12.0        # a bridge structure's height when not mapped
 STEEL_MATERIALS = ("", "steel", "metal", "iron")     # a part over a bridge support of these (or none mapped): steel
 MASONRY_MATERIALS = ("concrete", "stone", "brick", "masonry", "granite")
@@ -512,7 +512,7 @@ def plan(ring, attrs, neighbours=0, lat=None, lon=None, look=None, town=False, d
                     seed=seed, min_h=0.0, wall=None, windows=False, steeple=False, porch=False, cls="bridge_part",
                     deck=False, pitch=None)
     mat_ = str(attrs.get("facade_material") or "").lower()
-    if attrs.get("bridge_masonry") or (cls in BRIDGE_CLASSES and mat_ in MASONRY_MATERIALS):
+    if attrs.get("bridge_masonry") or cls == "bridge_pier" or (cls in BRIDGE_CLASSES and mat_ in MASONRY_MATERIALS):
         # a mapped masonry pier (Tower Bridge's 9 m concrete piers under its stone towers): a solid block, not a frame
         look = f"{STONE}|0" if mat_ in ("stone", "brick") else "bne_precast"
         return Spec(ring=ring, floors=1, floor_h=h or BRIDGE_PIER_M, height=h or BRIDGE_PIER_M, roof="flat",
@@ -1543,7 +1543,7 @@ def build(specs_and_ground, lite=False):
         if spec.cls == "toll_booth":        # a stock prop (toll_booth_rows)
             continue
         mat_idx = _Looks(spec.seed)
-        if spec.cls in BRIDGE_CLASSES:
+        if spec.cls in BRIDGE_CLASSES and spec.cls != "bridge_pier":
             _steel_frame(m, spec, gmin, mat_idx[spec.facade if spec.facade in LOOKS else STEEL], lite)
             continue
         ring = drawn_ring(spec)
@@ -1623,7 +1623,7 @@ def collision_mesh(specs_and_ground):
     tok = (MATERIALS.index(PANEL), (128, 128, 128, 255))
     zero = (0.0, 0.0)
     for spec, gmin, gmax in specs_and_ground:
-        if spec.cls in BRIDGE_CLASSES:          # its legs (the decks run between them)
+        if spec.cls in BRIDGE_CLASSES and spec.cls != "bridge_pier":          # its legs (the decks run between them)
             _steel_frame(m, spec, gmin, tok, True, legs_only=True)
             continue
         if deck_plan(spec, gmin, gmax) is not None:
@@ -1898,42 +1898,71 @@ def _clip_half(ring, p0, nrm, keep_ge):
 def _passages(rings, attrs, looks, mins, bridges_xy, decks=None, ground_at=None):
     """Buildings a road bridge runs through split round a PASSAGE_W wide way (Tower Bridge's road ran into its towers'
     stone and its Southern Gate, the user 2026-10-18: "the buildings are still in the middle of the bridge", "this
-    building is still blocking the bridge"). With the decks' heights (decks: [(xy (k, 2), z (k,))] relative to the
+    building is still blocking the bridge"). With the decks' heights (decks: [(xy (k, 2), z (k,), [w])] relative to the
     tile, ground_at(c (2,)) -> the ground under a footprint's centre): only where the deck passes through the
     building's height (a building under a viaduct stays whole): solid under the deck, the way PASSAGE_CLEAR over it,
     the whole footprint above. Without them, a bridge's own structure (bridge_part / bridge_masonry) starting within
     PASSAGE_BOTTOM_M gets the way PASSAGE_H over its bottom (its deck: the part starts at the road)."""
     R, A, L, M = [], [], [], []
     lines = [d[0] for d in decks] if decks else bridges_xy
+    if not lines:
+        return rings, attrs, looks, mins
+    deck_zs = [d[1] for d in decks] if decks else None
+    deck_ws = [float(d[2]) if len(d) >= 3 and d[2] is not None else PASSAGE_W for d in decks] if decks else [PASSAGE_W] * len(lines)
     for ring, at, look, mh in zip(rings, attrs, looks, mins):
         bridge_own = bool(at.get("bridge_part") or at.get("bridge_masonry"))
-        if not lines or road_through(ring, lines) < 3.0 or (not decks and (not bridge_own or mh > PASSAGE_BOTTOM_M)):
-            R.append(ring), A.append(at), L.append(look), M.append(mh)
-            continue
         c = ring.mean(0)
+        pts = np.vstack([ring, c])
         best = None
         for k, ln in enumerate(lines):
+            hw = max(deck_ws[k] / 2.0 + 1.5, PASSAGE_W / 2.0)
             for q in range(len(ln) - 1):
                 a, b = ln[q], ln[q + 1]
                 ab = b - a
-                t = float(np.clip((c - a) @ ab / max(ab @ ab, 1e-9), 0, 1))
-                d = float(np.hypot(*(a + t * ab - c)))
+                ab2 = float(ab @ ab)
+                if ab2 < 1e-9:
+                    continue
+                t = np.clip(((pts - a) @ ab) / ab2, 0.0, 1.0)
+                proj = a + t[:, None] * ab
+                dists = np.hypot(*(pts - proj).T)
+                min_i = int(np.argmin(dists))
+                d = float(dists[min_i])
                 if best is None or d < best[0]:
                     zd = None
-                    if decks:
-                        z = decks[k][1]
-                        zd = float(z[q] + t * (z[q + 1] - z[q]))
-                    best = (d, a + t * ab, ab / max(float(np.hypot(*ab)), 1e-9), zd)
-        _, p0, u, zd = best
+                    if deck_zs:
+                        z = deck_zs[k]
+                        zd = float(z[q] + t[min_i] * (z[q + 1] - z[q]))
+                    best = (d, proj[min_i], ab / max(float(np.hypot(*ab)), 1e-9), zd, hw, k)
+        if best is None:
+            R.append(ring), A.append(at), L.append(look), M.append(mh)
+            continue
+        d, p0, u, zd, hw, k = best
         nrm = np.array([-u[1], u[0]])
+        in_corridor = d <= hw or road_through(ring, [lines[k]]) > 0.0
+        if not in_corridor or (not decks and (not bridge_own or mh > PASSAGE_BOTTOM_M)):
+            R.append(ring), A.append(at), L.append(look), M.append(mh)
+            continue
         h = at.get("height")
         own = look is not None          # (a building's part carries its own height over its bottom, a building its top)
-        top = (mh + float(h) if own else float(h)) if h is not None and np.isfinite(h) else mh + PASSAGE_H + 3.0
+        is_bridge = bool(bridge_own or at.get("class") in BRIDGE_CLASSES)
+        if h is not None and np.isfinite(h) and float(h) > 0:
+            top = (mh + float(h)) if own else float(h)
+        else:
+            if is_bridge:
+                top = mh + BRIDGE_PIER_M
+            else:
+                nf = at.get("num_floors")
+                top = mh + (float(nf) * 3.3 if nf and np.isfinite(nf) else 10.0)
         if zd is not None and ground_at is not None and np.isfinite(zd):
             dh = zd - float(ground_at(c))           # the deck's height over the building's ground
-            if top <= dh + 1.0 or mh >= dh + PASSAGE_CLEAR:
+            if top <= dh - 1.0:
+                # Under the deck: clamp height to below underside (dh - 1.5) so it doesn't poke into the deck slab
+                clamped_h = min(top - mh if own else top, max(0.0, dh - 1.5 - mh if own else dh - 1.5))
+                R.append(ring), A.append(dict(at, height=clamped_h)), L.append(look), M.append(mh)
+                continue
+            if mh >= dh + PASSAGE_CLEAR:
                 R.append(ring), A.append(at), L.append(look), M.append(mh)
-                continue                            # under the deck, or over its way
+                continue                            # over its way
             low, cut = max(mh, dh - 1.5), dh + PASSAGE_CLEAR
         else:
             low, cut = mh, mh + PASSAGE_H
@@ -1941,10 +1970,10 @@ def _passages(rings, attrs, looks, mins, bridges_xy, decks=None, ground_at=None)
         if low > mh + 0.5:                          # solid under the deck
             R.append(ring), A.append(dict(at, height=(low - mh) if own else low)), L.append(look), M.append(mh)
         for sgn in (1, -1):
-            piece = _clip_half(ring, p0 + nrm * sgn * PASSAGE_W / 2, nrm * sgn, True)
+            piece = _clip_half(ring, p0 + nrm * sgn * hw, nrm * sgn, True)
             if piece is not None and cut > low + 0.5:
                 R.append(piece), A.append(dict(at, height=(cut - low) if own else cut)), L.append(look), M.append(low)
-        if top > cut + 1.0:
+        if top > cut + 1.0 and (is_bridge or float(at.get("building_height") or 0) > 20.0 or top >= 20.0):
             R.append(ring), A.append(dict(at, height=(top - cut) if own else top)), L.append(look), M.append(cut)
     return R, A, L, M
 
