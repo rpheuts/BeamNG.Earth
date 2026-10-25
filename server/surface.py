@@ -213,7 +213,7 @@ def warp(lat, lon):
 
 # road surface kind (roads.py) -> material; drawn in this order (paved last: it wins at junctions)
 ROAD_MATERIAL = {"dirt": DIRT, "gravel": LOOSE, "cobble": COBBLE, "paved": ASPHALT,
-                 "rock": ROCK, "grass": GRASS, "rail": LOOSE}     # rock and grass roads: the ground's own materials (roads.terrain_surface)
+                 "rock": ROCK, "grass": GRASS, "rail": ASPHALT}     # rock and grass roads: the ground's own materials (roads.terrain_surface)
 ROAD_ORDER = ("dirt", "gravel", "rock", "grass", "rail", "cobble", "paved")
 
 

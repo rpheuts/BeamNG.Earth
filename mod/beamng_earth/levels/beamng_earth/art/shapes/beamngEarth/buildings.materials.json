@@ -419,5 +419,28 @@
       {}
     ],
     "translucent": false
+  },
+  "rail_track": {
+    "name": "rail_track",
+    "mapTo": "rail_track",
+    "class": "Material",
+    "version": 1.5,
+    "persistentId": "f7a3c8e1-5b2d-4e9a-8c3f-1d4e6a8b0c2e",
+    "Stages": [
+      {
+        "baseColorMap": "/levels/beamng_earth/art/shapes/beamngEarth/t_rail_track_b.png",
+        "roughnessFactor": 0.5,
+        "metallicFactor": 0.3
+      },
+      {},
+      {},
+      {}
+    ],
+    "alphaRef": 128,
+    "castShadows": false,
+    "translucent": true,
+    "translucentZWrite": true,
+    "materialTag0": "RoadAndPath",
+    "materialTag1": "beamng_earth"
   }
 }

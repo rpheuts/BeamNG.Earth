@@ -159,6 +159,7 @@ DRAIN_IN, DRAIN_EVERY = 2.5, 90.0
 GUTTER = {"m": "gutter1", "tl": 8.0, "p": 14, "w": 0.5}                  # at the curb line
 CENTRE = {"tl": 12.0, "p": 6, "w": 0.12, "gap": 0.12}                    # a double line: two lines this far from the centre
 EDGE_LINE = {"m": "line_white", "tl": 6.4, "p": 2, "w": 0.15, "inset": 0.3}
+RAIL_TRACK = {"m": "rail_track", "tl": 2.4, "p": 5, "w": 2.8}                  # ties and rails ribbon over ballast bed
 MEASURE_SKIP = {"service"}      # classes not measured between buildings (lots, alleys: far walls)
 MEASURE_MAX = 3.0               # a measured carriageway at most this times the class default
 SIDEWALK_CLASSES = {"residential", "tertiary", "secondary", "primary", "unclassified", "living_street"}
@@ -1626,6 +1627,9 @@ def extras(spec, pts, lon, left_hand=False):
     pts: its centreline (k, 3) in the anchor frame; lon: its longitude (centre line colour). Pure."""
     out = []
     w, kind, urban, cls = spec[:4]
+    if kind == "rail":
+        out.append((RAIL_TRACK, RAIL_TRACK["w"], pts.copy()))
+        return out
     if kind not in BUILT:
         return out
     if has_sidewalks(spec):
@@ -3784,7 +3788,7 @@ def build_tile(frame, tx, ty, cells, elev, urban_fn=None, walks=None, bridges=No
         ex = extras(spec, pts, lon, left_hand) if fid not in jinternal else []    # inside a junction: none
         if not ex:
             continue
-        blockers = [(p2[:, :2], s2.width / 2 + CUT_MARGIN) for f2, s2, p2, _ in roads if f2 != fid]
+        blockers = [(p2[:, :2], s2.width / 2 + CUT_MARGIN) for f2, s2, p2, _ in roads if f2 != fid and s2.kind != "rail"]
         walk_blockers = [(p2[:, :2], s2.width / 2 if (fid, f2) in cornered else sidewalk_stop(spec, fid, s2, f2))
                          for f2, s2, p2, _ in roads if f2 != fid]
         # a median's band stops at the other carriageways' curbs only (their sidewalk is on their far side: it cut

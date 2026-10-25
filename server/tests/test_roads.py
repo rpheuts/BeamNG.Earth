@@ -996,7 +996,7 @@ class PaintRoadsTest(unittest.TestCase):
         f = features([[(-200, 0), (200, 0)]], ["standard_gauge"], subtypes=["rail"])
         idx = np.full(lat.shape, sf.GRASS, np.uint8)
         out = sf.paint_roads(idx, lat, lon, [f], 2.0)
-        self.assertEqual(int(out[64, 10]), sf.LOOSE, "rail painted as LOOSE ballast gravel under tyres")
+        self.assertEqual(int(out[64, 10]), sf.ASPHALT, "rail painted as ASPHALT under tyres to eliminate dust")
         self.assertNotEqual(int(out[64, 10]), sf.GRASS, "no 3D grass on rail corridor")
 
     def test_bare_verge_beside_roads(self):
@@ -1150,3 +1150,24 @@ class ChainResolveTest(unittest.TestCase):
                 pool = {("b", 0): pool[("b", 0)], ("a", 0): pool[("a", 0)]}
             self.assertEqual(res._resolve(("a", 0), pool, {}, set()), [("a", 0), ("b", 0)])
             self.assertEqual(float(pool[("b", 0)][1][-1][0]), 300.0)
+
+
+class RailTrackTest(unittest.TestCase):
+    def test_rail_extras_creates_track_chunk(self):
+        spec = roads.Spec(width=4.8, kind="rail", urban=False, cls="rail")
+        pts = np.array([[0.0, 0.0, 0.0], [100.0, 0.0, 0.0]])
+        ex = roads.extras(spec, pts, LON)
+        self.assertEqual(len(ex), 1)
+        look, w, line = ex[0]
+        self.assertEqual(look["m"], "rail_track")
+        self.assertEqual(w, 2.8)
+        self.assertTrue(np.allclose(line, pts))
+
+    def test_rail_track_layer_is_mark(self):
+        import roadmesh
+        self.assertEqual(roadmesh.layer_of({"m": "rail_track"}), "mark")
+
+    def test_rail_ground_material_is_asphalt(self):
+        import surface
+        self.assertEqual(surface.ROAD_MATERIAL["rail"], surface.ASPHALT)
+

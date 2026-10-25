@@ -28,7 +28,7 @@ LIFT = {"base": 0.0, "gutter": 0.005, "mark": 0.01}   # m above the physics grou
 
 def layer_of(chunk):
     m = chunk["m"]
-    if m.startswith("line_") or m.startswith("crossing") or m == "m_metal_grid_drain":
+    if m.startswith("line_") or m.startswith("crossing") or m == "m_metal_grid_drain" or m.startswith("rail_"):
         return "mark"
     if m == "gutter1":
         return "gutter"
