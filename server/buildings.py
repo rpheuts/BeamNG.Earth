@@ -1913,9 +1913,10 @@ def _passages(rings, attrs, looks, mins, bridges_xy, decks=None, ground_at=None)
         bridge_own = bool(at.get("bridge_part") or at.get("bridge_masonry"))
         c = ring.mean(0)
         pts = np.vstack([ring, c])
-        best = None
+        deck_hits = []
         for k, ln in enumerate(lines):
             hw = max(deck_ws[k] / 2.0 + 1.5, PASSAGE_W / 2.0)
+            best_ln = None
             for q in range(len(ln) - 1):
                 a, b = ln[q], ln[q + 1]
                 ab = b - a
@@ -1927,21 +1928,40 @@ def _passages(rings, attrs, looks, mins, bridges_xy, decks=None, ground_at=None)
                 dists = np.hypot(*(pts - proj).T)
                 min_i = int(np.argmin(dists))
                 d = float(dists[min_i])
-                if best is None or d < best[0]:
+                if best_ln is None or d < best_ln[0]:
                     zd = None
                     if deck_zs:
                         z = deck_zs[k]
                         zd = float(z[q] + t[min_i] * (z[q + 1] - z[q]))
-                    best = (d, proj[min_i], ab / max(float(np.hypot(*ab)), 1e-9), zd, hw, k)
-        if best is None:
+                    best_ln = (d, proj[min_i], ab / max(float(np.hypot(*ab)), 1e-9), zd, hw, k)
+            if best_ln is not None:
+                d, p0_k, u_k, zd_k, hw_k, _ = best_ln
+                in_corr = d <= hw_k or road_through(ring, [lines[k]]) > 0.0
+                if in_corr:
+                    deck_hits.append(best_ln)
+        if not deck_hits:
             R.append(ring), A.append(at), L.append(look), M.append(mh)
             continue
+        deck_hits.sort(key=lambda h: h[0])
+        best = deck_hits[0]
         d, p0, u, zd, hw, k = best
         nrm = np.array([-u[1], u[0]])
-        in_corridor = d <= hw or road_through(ring, [lines[k]]) > 0.0
-        if not in_corridor or (not decks and (not bridge_own or mh > PASSAGE_BOTTOM_M)):
+        if not decks and (not bridge_own or mh > PASSAGE_BOTTOM_M):
             R.append(ring), A.append(at), L.append(look), M.append(mh)
             continue
+        s_ranges = []
+        zds = []
+        for hit in deck_hits:
+            d_k, p_k, u_k, zd_k, hw_k, k_k = hit
+            if abs(u_k @ u) > 0.5:
+                s_k = float((p_k - p0) @ nrm)
+                s_ranges.append((s_k - hw_k, s_k + hw_k))
+                if zd_k is not None:
+                    zds.append(zd_k)
+        s_min = min(r[0] for r in s_ranges)
+        s_max = max(r[1] for r in s_ranges)
+        if zds:
+            zd = min(zds)
         h = at.get("height")
         own = look is not None          # (a building's part carries its own height over its bottom, a building its top)
         is_bridge = bool(bridge_own or at.get("class") in BRIDGE_CLASSES)
@@ -1954,7 +1974,11 @@ def _passages(rings, attrs, looks, mins, bridges_xy, decks=None, ground_at=None)
                 nf = at.get("num_floors")
                 top = mh + (float(nf) * 3.3 if nf and np.isfinite(nf) else 10.0)
         if zd is not None and ground_at is not None and np.isfinite(zd):
-            dh = zd - float(ground_at(c))           # the deck's height over the building's ground
+            try:
+                g_base = float(ground_at(ring))
+            except Exception:
+                g_base = float(ground_at(c))
+            dh = zd - g_base                    # the deck's height over the building's ground base
             if top <= dh - 1.0:
                 # Under the deck: clamp height to below underside (dh - 1.5) so it doesn't poke into the deck slab
                 clamped_h = min(top - mh if own else top, max(0.0, dh - 1.5 - mh if own else dh - 1.5))
@@ -1969,10 +1993,12 @@ def _passages(rings, attrs, looks, mins, bridges_xy, decks=None, ground_at=None)
         cut = min(cut, top)
         if low > mh + 0.5:                          # solid under the deck
             R.append(ring), A.append(dict(at, height=(low - mh) if own else low)), L.append(look), M.append(mh)
-        for sgn in (1, -1):
-            piece = _clip_half(ring, p0 + nrm * sgn * hw, nrm * sgn, True)
-            if piece is not None and cut > low + 0.5:
-                R.append(piece), A.append(dict(at, height=(cut - low) if own else cut)), L.append(look), M.append(low)
+        p_pos = _clip_half(ring, p0 + nrm * s_max, nrm, True)
+        if p_pos is not None and cut > low + 0.5:
+            R.append(p_pos), A.append(dict(at, height=(cut - low) if own else cut)), L.append(look), M.append(low)
+        p_neg = _clip_half(ring, p0 + nrm * s_min, -nrm, True)
+        if p_neg is not None and cut > low + 0.5:
+            R.append(p_neg), A.append(dict(at, height=(cut - low) if own else cut)), L.append(look), M.append(low)
         if top > cut + 1.0 and (is_bridge or float(at.get("building_height") or 0) > 20.0 or top >= 20.0):
             R.append(ring), A.append(dict(at, height=(top - cut) if own else top)), L.append(look), M.append(cut)
     return R, A, L, M
@@ -2295,9 +2321,12 @@ def tile_buildings(frame, x0, y0, x1, y1, layers, elev, water=None, part_layers=
         return []
     if bridges_xy or decks:             # a road bridge through a building: a passage (Tower Bridge's towers and gate)
         def ground_at(c):
-            la, lo, _ = frame.enu_to_geodetic(float(c[0]) + x0, float(c[1]) + y0, 0.0)
-            z = float(np.asarray(elev(np.array([float(la)]), np.array([float(lo)])), np.float64)[0])
-            return float(frame.geodetic_to_enu(float(la), float(lo), z)[2])       # (the decks' frame up)
+            pts = np.atleast_2d(c)
+            la, lo, _ = frame.enu_to_geodetic(pts[:, 0] + x0, pts[:, 1] + y0, np.zeros(len(pts)))
+            la, lo = np.asarray(la, np.float64), np.asarray(lo, np.float64)
+            gz = np.asarray(elev(la, lo), np.float64)
+            up = np.asarray(frame.geodetic_to_enu(la, lo, gz)[2], np.float64)
+            return float(np.nanmax(up)) if pts.shape[0] > 1 else float(up[0])
         rings, attrs, looks, mins = _passages(rings, attrs, looks, mins, bridges_xy, decks, ground_at)
     shared = _shared_walls(rings)
     cover = sum(_area2(r) / 2 for r, mh in zip(rings, mins) if mh <= 0.5) / ((x1 - x0) * (y1 - y0))

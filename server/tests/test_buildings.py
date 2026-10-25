@@ -665,6 +665,55 @@ class BridgePassageTest(unittest.TestCase):
         d2 = [(np.array([[0.0, 0.0], [50.0, 50.0]]), np.array([10.0, 10.0]))]
         self.assertEqual(bld.road_tile_items(frame, 100, 100, md, ground, decks=d2), [])
 
+    def test_sloped_ground_under_deck_clearance(self):
+        """On sloped ground (e.g. Tukwila station where terrain slopes by 6m across the footprint),
+        the under-deck building height is clamped using footprint gmax so its roof stays <= zd - 1.5m."""
+        # Building footprint: [-10, -10] to [10, 10], centroid c = [0, 0]
+        ring = np.array([[-10.0, -10.0], [10.0, -10.0], [10.0, 10.0], [-10.0, 10.0], [-10.0, -10.0]], float)
+        road = [np.array([[0.0, -50.0], [0.0, 50.0]])]
+        deck = [(road[0], np.array([20.0, 20.0]))]
+        # Ground slopes: center is 5.0m, but north edge is 10.0m (gmax = 10.0m)
+        # ground_fn returns gmax when called with array of points (ring), or single point elevation
+        def ground_fn(pts):
+            pts = np.atleast_2d(pts)
+            elevs = 5.0 + pts[:, 1] * 0.5  # y ranges from -10 to +10, elev ranges from 0 to 10
+            return float(elevs.max()) if pts.shape[0] > 1 else float(elevs[0])
+
+        R, A, L, M = bld._passages([ring], [{"height": 30.0}], [None], [0.0], road, deck, ground_fn)
+        # Piece 0 is the under-deck piece
+        under_deck = A[0]
+        gmax = 10.0
+        # Roof elevation = gmax + spec.height
+        roof_z = gmax + under_deck["height"]
+        # zd is 20.0, so roof must stay <= 20.0 - 1.5 = 18.5m
+        self.assertLessEqual(roof_z, 20.0 - 1.5 + 1e-6)
+        self.assertAlmostEqual(roof_z, 18.5, places=2)
+
+    def test_multi_track_parallel_decks_corridor(self):
+        """Twin parallel tracks (e.g. light rail or dual carriageways spaced 4.6m apart)
+        combine their corridors so both tracks are fully unobstructed by station side walls."""
+        # Building footprint: [-20, -20] to [20, 20]
+        ring = np.array([[-20.0, -20.0], [20.0, -20.0], [20.0, 20.0], [-20.0, 20.0], [-20.0, -20.0]], float)
+        # Two parallel tracks along y axis: Track 1 at x = -2.3, Track 2 at x = +2.3 (width 4.0m each, hw = 5.5m)
+        trk1 = np.array([[-2.3, -50.0], [-2.3, 50.0]])
+        trk2 = np.array([[2.3, -50.0], [2.3, 50.0]])
+        decks = [
+            (trk1, np.array([15.0, 15.0]), 4.0),
+            (trk2, np.array([15.0, 15.0]), 4.0),
+        ]
+        R, A, L, M = bld._passages([ring], [{"height": 25.0}], [None], [0.0], None, decks, lambda c: 0.0)
+        # Side pieces must be clear of both tracks
+        # trk1 is at -2.3 (hw=5.5 -> reaches -7.8 on left)
+        # trk2 is at +2.3 (hw=5.5 -> reaches +7.8 on right)
+        # So side pieces must be <= -7.8 or >= +7.8
+        # M has [0.0 (under-deck), 13.5 (side), 13.5 (side), 21.5 (over-deck)]
+        side_pieces = [r for r, m in zip(R, M) if m == 13.5]
+        self.assertEqual(len(side_pieces), 2)
+        for piece in side_pieces:
+            x_min, x_max = piece[:, 0].min(), piece[:, 0].max()
+            # Must be completely outside the combined corridor [-7.8, +7.8]
+            self.assertTrue(x_max <= -7.8 + 1e-6 or x_min >= 7.8 - 1e-6)
+
 
 class MachineLearnedFootprintTest(unittest.TestCase):
     """Microsoft's machine-learned footprints on a road bridge or on water are its deck or a boat (Tower Bridge's
