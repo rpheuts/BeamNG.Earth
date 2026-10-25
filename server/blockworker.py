@@ -439,7 +439,8 @@ def _tile_decks(bridges, cells, tx, ty):
     import roads as roadsmod
     x0, y0, x1, y1 = roadsmod.tile_bbox(tx, ty)
     try:
-        return [(np.asarray(xy, np.float64)[:, :2], np.asarray(z, np.float64), float(spec.width))
+        return [(np.asarray(xy, np.float64)[:, :2], np.asarray(z, np.float64),
+                 float(getattr(spec, "width", 11.0) or 11.0))
                 for _, spec, xy, z, _ in bridges.parts(cells, (x0 - 20, y0 - 20, x1 + 20, y1 + 20))]
     except Exception as e:      # no ways cut rather than no buildings
         log.debug("tile decks: %s: %s", type(e).__name__, e)

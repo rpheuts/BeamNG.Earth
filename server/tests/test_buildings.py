@@ -650,6 +650,21 @@ class BridgePassageTest(unittest.TestCase):
         pier_spec = bld.plan(np.array([[0, 0], [4, 0], [4, 4], [0, 4]]), {"class": "bridge_pier", "height": 10.0})
         self.assertEqual(bld.collider_boxes([(pier_spec, 0.0, 0.0)], 0.0, 0.0), [])
 
+    def test_road_tile_items_deck_unpacking(self):
+        """road_tile_items accepts 3-element decks tuples (xy, z, width) and 2-element tuples (xy, z) without unpacking error."""
+        import geodesy
+        from unittest.mock import MagicMock
+        frame = geodesy.EnuFrame(52.0, 6.0)
+        md = MagicMock()
+        md.cell.return_value.layers.get.return_value = None
+        ground = lambda la, lo: 0.0
+        # 3-element decks: (xy, z, width)
+        d3 = [(np.array([[0.0, 0.0], [50.0, 50.0]]), np.array([10.0, 10.0]), 12.0)]
+        self.assertEqual(bld.road_tile_items(frame, 100, 100, md, ground, decks=d3), [])
+        # 2-element decks: (xy, z)
+        d2 = [(np.array([[0.0, 0.0], [50.0, 50.0]]), np.array([10.0, 10.0]))]
+        self.assertEqual(bld.road_tile_items(frame, 100, 100, md, ground, decks=d2), [])
+
 
 class MachineLearnedFootprintTest(unittest.TestCase):
     """Microsoft's machine-learned footprints on a road bridge or on water are its deck or a boat (Tower Bridge's

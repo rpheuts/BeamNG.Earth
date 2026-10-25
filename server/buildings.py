@@ -2767,8 +2767,10 @@ def road_tile_items(frame, tx, ty, md, ground, decks=None):
                           supports=support_rings(frame, [c.layers.get("infrastructure") for c in cds], x0, y0),
                           bridges_xy=bridge_lines(frame, [c.layers.get("roads") for c in cds], x0, y0),
                           water_xy=water_rings(frame, [c.layers.get("water") for c in cds], x0, y0),
-                          decks=[(np.asarray(xy, np.float64)[:, :2] - [x0, y0], np.asarray(z, np.float64))
-                                 for xy, z in decks] if decks else None)
+                          decks=[(np.asarray(d[0], np.float64)[:, :2] - [x0, y0],
+                                  np.asarray(d[1], np.float64),
+                                  float(d[2]) if len(d) >= 3 and d[2] is not None else None)
+                                 for d in decks] if decks else None)
 
 
 TOWN_COVERAGE = 0.16        # a tile whose footprints cover less than this share is a town / suburb (heights)
