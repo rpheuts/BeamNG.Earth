@@ -20,7 +20,10 @@ import staging
 # classes the AI drives on: drivability (path cost divisor) and a default speed limit (mph, US practice)
 DRIVE = {"motorway": (1.0, 65), "trunk": (1.0, 55), "primary": (1.0, 45), "secondary": (1.0, 40),
          "tertiary": (0.9, 35), "residential": (0.8, 25), "unclassified": (0.8, 30), "living_street": (0.5, 15),
-         "service": (0.4, 15), "unknown": (0.6, 25)}
+         "service": (0.4, 15), "unknown": (0.6, 25),
+         "standard_gauge": (0.05, 50), "rail": (0.05, 50), "light_rail": (0.05, 35),
+         "narrow_gauge": (0.05, 30), "subway": (0.05, 45), "tram": (0.1, 25),
+         "monorail": (0.05, 30), "funicular": (0.05, 20)}
 SKIP_SUBCLASSES = {"driveway", "parking_aisle", "sidewalk", "crosswalk", "cycle_crossing"}
 URBAN_MPH_CAP = {"primary": 35, "secondary": 35, "tertiary": 30}   # in town (spec.urban) unless mapped
 # the km/h countries' rural defaults for the fast classes (Europe's 120-130 motorways: Bavaria's A9, unmapped, was
@@ -112,7 +115,7 @@ def driving_width(spec):
     urban arterial is all lanes."""
     if spec.urban and not spec.oneway and spec.cls in roads.URBAN_ARTERIAL:
         return float(spec.width)
-    w = roads.STYLE.get(spec.cls, roads.STYLE["unknown"])[0]
+    w = roads.RAIL_STYLE.get(spec.cls, roads.STYLE.get(spec.cls, roads.STYLE["unknown"]))[0]
     if spec.oneway and spec.cls in roads.ONEWAY_STYLE:
         w = roads.ONEWAY_STYLE[spec.cls]
     if roads.rural_motorway(spec):      # two lanes between the shoulders (a ramp: one, roads.motorway_shoulder)

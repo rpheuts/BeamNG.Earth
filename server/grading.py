@@ -332,7 +332,8 @@ def _add_cuts(frame, plans, elev):
 
 def _plan(xy, z, spec, abut=(False, False)):
     built = spec.kind in roadsmod.BUILT
-    zs = smooth_profile(z, PROFILE_STEP, SIGMA_M if built else DIRT_SIGMA_M)
+    smooth_sigma = SIGMA_M if (built or spec.kind == "rail") else DIRT_SIGMA_M
+    zs = smooth_profile(z, PROFILE_STEP, smooth_sigma)
     # thin to VERTEX_STEP (the profile stays smooth between: linear in the grading pass)
     every = max(1, int(round(VERTEX_STEP / PROFILE_STEP)))
     keep = np.r_[np.arange(0, len(xy) - 1, every), len(xy) - 1]
@@ -348,6 +349,8 @@ def _plan(xy, z, spec, abut=(False, False)):
 def shoulder(spec):
     """m of flat ground beyond the carriageway edge, each side. Like the core width, never from the land
     cover: a road class that gets sidewalks in towns keeps a sidewalk-wide verge everywhere."""
+    if spec.kind == "rail":
+        return SHOULDER_M
     if spec.kind not in roadsmod.BUILT:
         return 0.0
     if spec.cls in roadsmod.SIDEWALK_CLASSES or (spec.cls == "trunk" and (not spec.oneway

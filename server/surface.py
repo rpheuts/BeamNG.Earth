@@ -213,8 +213,8 @@ def warp(lat, lon):
 
 # road surface kind (roads.py) -> material; drawn in this order (paved last: it wins at junctions)
 ROAD_MATERIAL = {"dirt": DIRT, "gravel": LOOSE, "cobble": COBBLE, "paved": ASPHALT,
-                 "rock": ROCK, "grass": GRASS}     # rock and grass roads: the ground's own materials (roads.terrain_surface)
-ROAD_ORDER = ("dirt", "gravel", "rock", "grass", "cobble", "paved")
+                 "rock": ROCK, "grass": GRASS, "rail": LOOSE}     # rock and grass roads: the ground's own materials (roads.terrain_surface)
+ROAD_ORDER = ("dirt", "gravel", "rock", "grass", "rail", "cobble", "paved")
 
 
 def grid_affine(lat, lon):
@@ -350,8 +350,8 @@ def paint_roads(idx, lat, lon, feats_list, square, urban_fn=None, widths=None, e
 # meshes.
 # colour and opacity by surface, blended in this order (paved last: it wins at junctions); a trace of the photo is kept
 # (stains, patches), and most of it on unpaved tracks, which the photo shows well and a flat colour drew as stripes
-PHOTO_ROAD_RGBA = {"dirt": (122, 104, 82, 0.45), "gravel": (128, 118, 102, 0.6), "cobble": (112, 104, 96, 0.85),
-                   "paved": (95, 95, 94, 0.92)}
+PHOTO_ROAD_RGBA = {"dirt": (122, 104, 82, 0.45), "gravel": (128, 118, 102, 0.6), "rail": (85, 80, 76, 0.95),
+                   "cobble": (112, 104, 96, 0.85), "paved": (95, 95, 94, 0.92)}
 PHOTO_ROADS_MAX_TEXEL = 2.0     # m per texel: coarser far tiles keep the photo's own roads (far, under a pixel wide)
 
 

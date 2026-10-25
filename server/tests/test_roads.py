@@ -162,6 +162,39 @@ class RulesTest(unittest.TestCase):
         self.assertEqual(s[0][0], roads.STYLE["residential"][0] + 2 * roads.PARKING_M)
         self.assertEqual(s[1][0], 9.0, "width rule wins over the parking guess")
 
+    def test_rail_specs_extracted(self):
+        f = features([[(0, 0), (10, 0)]] * 4,
+                     classes=["standard_gauge", "light_rail", "narrow_gauge", "something_else"],
+                     subtypes=["rail"] * 4)
+        s = roads.road_specs(f)
+        self.assertIsNotNone(s[0])
+        self.assertEqual(s[0].width, 4.5)
+        self.assertEqual(s[0].kind, "rail")
+        self.assertEqual(s[0].surf, "ballast")
+        self.assertEqual(s[0].walk, 0.0, "rail tracks have no sidewalks")
+        self.assertFalse(s[0].oneway)
+
+        self.assertIsNotNone(s[1])
+        self.assertEqual(s[1].width, 4.0)
+        self.assertEqual(s[1].kind, "rail")
+
+        self.assertIsNotNone(s[2])
+        self.assertEqual(s[2].width, 3.5)
+        self.assertEqual(s[2].kind, "rail")
+
+        # unknown rail class falls back to 4.5m
+        self.assertIsNotNone(s[3])
+        self.assertEqual(s[3].width, 4.5)
+        self.assertEqual(s[3].cls, "unknown")
+
+    def test_rail_bridge_specs(self):
+        f = features([[(0, 0), (10, 0)]], classes=["standard_gauge"], subtypes=["rail"], flags=[(0, "is_bridge")])
+        s = roads.bridge_specs(f)
+        self.assertIsNotNone(s[0])
+        self.assertEqual(s[0].kind, "rail")
+        self.assertEqual(s[0].width, 4.5)
+
+
 
 class DualCarriagewayTest(unittest.TestCase):
     def feats(self, lines, names, classes=None):
@@ -957,6 +990,14 @@ class PaintRoadsTest(unittest.TestCase):
         self.assertEqual(int(out[30, 74]), sf.DIRT, "on the track (20 m east)")
         self.assertEqual(int(out[64, 74]), sf.ASPHALT, "paved wins at the crossing")
         self.assertEqual(int(idx[64, 10]), sf.GRASS, "input untouched")
+
+    def test_rail_painted_as_gravel_ballast_clearing_grass(self):
+        lat, lon = self.grid()
+        f = features([[(-200, 0), (200, 0)]], ["standard_gauge"], subtypes=["rail"])
+        idx = np.full(lat.shape, sf.GRASS, np.uint8)
+        out = sf.paint_roads(idx, lat, lon, [f], 2.0)
+        self.assertEqual(int(out[64, 10]), sf.LOOSE, "rail painted as LOOSE ballast gravel under tyres")
+        self.assertNotEqual(int(out[64, 10]), sf.GRASS, "no 3D grass on rail corridor")
 
     def test_bare_verge_beside_roads(self):
         """Grass tufts stood on the asphalt along road edges (the user, 2026-10-20): a road without sidewalks gets a

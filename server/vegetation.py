@@ -49,7 +49,9 @@ TREE_PIT_M = 0.4            # m past a road's edge (+ the push's 0.6) where a to
 PATH_CLASSES = {"footway", "path", "steps", "cycleway", "bridleway", "pedestrian"}   # no corridor: street trees
                             # stand in the sidewalk (mapped as a footway: Boston Street's row sat on its line)
 ROAD_HALF_WIDTH_M = {"motorway": 7.0, "trunk": 6.0, "primary": 5.5, "secondary": 5.0, "tertiary": 4.5,
-                     "residential": 4.0, "service": 3.0, "unclassified": 3.5, "living_street": 3.0}
+                     "residential": 4.0, "service": 3.0, "unclassified": 3.5, "living_street": 3.0,
+                     "standard_gauge": 2.5, "rail": 2.5, "light_rail": 2.5, "narrow_gauge": 2.0,
+                     "subway": 2.5, "tram": 2.5, "monorail": 2.0, "funicular": 2.0}
 ROAD_HALF_DEFAULT_M = 2.5
 SCATTER_CELL_M = 6.0        # the hashed scatter's grid (one candidate per cell)
 # class: (bush, rock). Tree cover (10) gets an understory (Columbia's photos: forest edges are thickets

@@ -67,6 +67,18 @@ STYLE = {
     # and graded by the terrain alone (grading.UNGRADED: an oval's banking stays)
     "raceway": (12.0, True),
 }
+# Overture transportation segment subtype="rail" classes and their default single-track ballast bed widths
+RAIL_STYLE = {
+    "standard_gauge": (4.5, False),
+    "rail": (4.5, False),
+    "light_rail": (4.0, False),
+    "narrow_gauge": (3.5, False),
+    "subway": (4.0, False),
+    "tram": (3.5, True),
+    "monorail": (3.5, False),
+    "funicular": (3.0, False),
+    "unknown": (4.5, False),
+}
 PAVED = {"paved", "asphalt", "concrete", "metal", "wood"}
 COBBLE = {"paving_stones", "sett", "cobblestone", "unhewn_cobblestone", "bricks"}   # Overture: "paving_stones"
 # interlocking concrete pavers under the names the map gives them (surface_kind: a street paved with them is a
@@ -94,6 +106,7 @@ LOOK = {
     "cobble": {"m": "italy_cobblestone", "tl": 2.5, "p": 20, "strip": 2.5},
     "gravel": {"m": "m_dirt_road", "tl": 88.0, "p": 21},
     "dirt": {"m": "m_dirt_road", "tl": 88.0, "p": 21},
+    "rail": {"m": "m_dirt_road", "tl": 88.0, "p": 21},
 }
 # a `surface=concrete` street is still a paved one (markings, widths, the tyres' asphalt feel) but is drawn with
 # gridmap v2's plain concrete instead of asphalt (the user, 2026-10-22: "for concrete road surfaces")
@@ -547,6 +560,11 @@ def carriageway(cls, kind, urban, rule_width=None, oneway=False, lanes=None):
     already). Pure."""
     if rule_width is not None:
         return rule_width
+    if kind == "rail" or cls in RAIL_STYLE:
+        w = RAIL_STYLE.get(cls, RAIL_STYLE["unknown"])[0]
+        if lanes and lanes > 1:
+            w = max(w, lanes * 4.0)
+        return w
     w = STYLE.get(cls, STYLE["unknown"])[0]
     if oneway and cls in ONEWAY_STYLE:
         w = ONEWAY_STYLE[cls]
@@ -758,7 +776,17 @@ def _road_specs(feats, urban_fn, widths, left_hand):
     lens = _lengths(feats) if ncon is not None else None
     for i in range(len(feats)):
         cls = str(feats.attrs["class"][i]) if "class" in feats.attrs else "unknown"
-        if str(feats.attrs.get("subtype", ["road"] * len(feats))[i]) != "road" or cls not in STYLE:
+        sub = str(feats.attrs.get("subtype", ["road"] * len(feats))[i])
+        if sub == "rail":
+            if cls not in RAIL_STYLE:
+                cls = "unknown"
+            is_rail = True
+        elif sub == "road":
+            if cls not in STYLE:
+                out.append(None)
+                continue
+            is_rail = False
+        else:
             out.append(None)
             continue
         rngs = level_ranges(feats, i)
@@ -771,6 +799,11 @@ def _road_specs(feats, urban_fn, widths, left_hand):
             rule_w = _osm(feats, "width", i, *OSM_WIDTH_M)      # OpenStreetMap's width (osmtags.py)
         lanes = _osm(feats, "lanes", i, *OSM_LANES)
         lanes = int(lanes) if lanes is not None else None
+        if is_rail:
+            kind = "rail"
+            cw = carriageway(cls, kind, False, rule_w, False, lanes)
+            out.append(Spec(cw, kind, False, cls, False, 0.0, 0, 80, None, lanes=lanes, surf="ballast"))
+            continue
         surf = _rule_value(rules.get("surface"), i)
         kind = surface_kind(cls, surf)
         ow = _rule_value(rules.get("oneway"), i) is not None
@@ -844,7 +877,17 @@ def _bridge_specs(feats, want="bridge"):
     rules = feats.rules
     for i in range(len(feats)):
         cls = str(feats.attrs["class"][i]) if "class" in feats.attrs else "unknown"
-        if str(feats.attrs.get("subtype", ["road"] * len(feats))[i]) != "road" or cls not in STYLE:
+        sub = str(feats.attrs.get("subtype", ["road"] * len(feats))[i])
+        if sub == "rail":
+            if cls not in RAIL_STYLE:
+                cls = "unknown"
+            is_rail = True
+        elif sub == "road":
+            if cls not in STYLE:
+                out.append(None)
+                continue
+            is_rail = False
+        else:
             out.append(None)
             continue
         if not any(k == want for _, _, k in level_ranges(feats, i)):
@@ -852,12 +895,19 @@ def _bridge_specs(feats, want="bridge"):
             continue
         width = _rule_value(rules.get("width"), i)
         rule_w = float(width) if width is not None and 1.0 <= float(width) <= 40.0 else None
-        surf = _rule_value(rules.get("surface"), i)
-        kind = surface_kind(cls, surf)
-        ow = _rule_value(rules.get("oneway"), i) is not None
-        if rule_w is None and _rule_value(rules.get("subclass"), i) == "link":
-            rule_w = LINK_M[1] if ow else LINK_M[2]
-        out.append(Spec(carriageway(cls, kind, False, rule_w, ow), kind, False, cls, ow,
+        if is_rail:
+            kind = "rail"
+            surf = "ballast"
+            ow = False
+            cw = carriageway(cls, kind, False, rule_w, False)
+        else:
+            surf = _rule_value(rules.get("surface"), i)
+            kind = surface_kind(cls, surf)
+            ow = _rule_value(rules.get("oneway"), i) is not None
+            if rule_w is None and _rule_value(rules.get("subclass"), i) == "link":
+                rule_w = LINK_M[1] if ow else LINK_M[2]
+            cw = carriageway(cls, kind, False, rule_w, ow)
+        out.append(Spec(cw, kind, False, cls, ow,
                         surf=surface_token(surf)))
     return out
 

@@ -54,6 +54,13 @@ class GraphTest(unittest.TestCase):
         ys = {round(n[1]) for n in g["nodes"].values()}
         self.assertEqual(ys, {20}, "only the residential street in the window")
 
+    def test_rail_in_navgraph_with_low_drivability(self):
+        f = features([[(0, 0), (100, 0)]], ["standard_gauge"], subtypes=["rail"])
+        g = navgraph.build(FRAME, [f], flat, (0.0, 0.0), window=1100.0)
+        self.assertGreater(len(g["edges"]), 0, "railway edge is in navgraph")
+        for e in g["edges"]:
+            self.assertEqual(e[6], 0.05, "railway edge has low drivability (0.05) so traffic ignores it")
+
     def test_even_lanes_and_no_parking_lanes(self):
         import roads
         for cls in ("residential", "tertiary", "secondary", "primary"):
