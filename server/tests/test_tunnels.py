@@ -404,3 +404,21 @@ class Underwater(unittest.TestCase):
         w = np.zeros(50, bool)
         w[40:] = True
         self.assertEqual(roads.wet_run_inside(xy, w), 0.0)              # at an end: a portal on a bank
+
+    def test_railway_tunnel_continuous_without_intermediate_portals(self):
+        """Railway tunnels (such as light rail under Seattle) are preserved as continuous tubes
+        rather than split into open road segments with portal face walls at internal joints."""
+        from test_roads import features, FRAME, flat
+        lines = [[(-200.0, 0.0), (0.0, 0.0)], [(0.0, 0.0), (200.0, 0.0)]]
+        f = features(lines, ["light_rail", "light_rail"], subtypes=["rail", "rail"],
+                     flags=[(0, "is_tunnel"), (1, "is_tunnel")])
+        tp = roads.TunnelProfiles(FRAME, lambda key: f, flat)
+        box = (-256.0, -64.0, 256.0, 64.0)
+        parts = tp.parts([f], box)
+        self.assertEqual(len(parts), 2, "both segments preserved in parts")
+        self.assertEqual(len(tp.open_parts([f], box)), 0, "no railway parts degraded to open road")
+
+        sub0 = parts[0][0]
+        sub1 = parts[1][0]
+        self.assertEqual(tp.mouth(sub0), (True, False), "first part has portal only at start")
+        self.assertEqual(tp.mouth(sub1), (False, True), "second part has portal only at end")

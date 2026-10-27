@@ -642,6 +642,19 @@ class BridgePassageTest(unittest.TestCase):
         R, *_ = bld._passages([ring], [{"height": 10.0}], [None], [0.0], road, deck_low, lambda c: 0.0)
         self.assertEqual(len(R), 0)
 
+    def test_tunnel_passage_clearance_envelope(self):
+        """A tunnel corridor in decks with 7.2m clearance cuts a 7.2m clear passage through an intersecting building."""
+        ring = np.array([[-10, -10], [10, -10], [10, 10], [-10, 10], [-10, -10]], float)
+        road = [np.array([[0.0, -50.0], [0.0, 50.0]])]
+        tunnel_deck = [(road[0], np.array([12.0, 12.0]), 10.0, 7.2)]
+        R, A, L, M = bld._passages([ring], [{"height": 22.0}], [None], [0.0], road, tunnel_deck, lambda c: 3.0)
+        self.assertIn(9.0 + 7.2, M)
+
+    def test_railway_in_through_classes_and_road_lines(self):
+        """Railway tracks are included in THROUGH_CLASSES so buildings over them are lifted or cleared."""
+        for cls in ("rail", "light_rail", "subway", "tram", "standard_gauge"):
+            self.assertIn(cls, bld.THROUGH_CLASSES)
+
     def test_bridge_classes_exclude_piers_from_collider_boxes(self):
         """bridge_pier and bridge_part are in BRIDGE_CLASSES and excluded from collider_boxes."""
         self.assertIn("bridge_structure", bld.BRIDGE_CLASSES)

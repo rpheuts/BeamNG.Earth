@@ -365,7 +365,7 @@ def roads_tile(aid, lat, lon, zoom, tx, ty, out_dir, vfs_dir, sidewalks, lift, b
         import buildings as buildingsmod
         items = buildingsmod.road_tile_items(frame, tx, ty, _s.md,
                                              lambda la, lo: ground(frame, la, lo, _s.dem.sample(la, lo, zoom)),
-                                             decks=_tile_decks(bridges, cells, tx, ty))
+                                             decks=_tile_decks(bridges, cells, tx, ty, tunnels=tunnels))
         town = buildingsmod.coverage(items) < buildingsmod.POLES_COVERAGE
     rwalls = []
     ctx = []
@@ -431,20 +431,32 @@ def _with_plazas(mesh, frame, tx, ty, elev, origin, surface):
         return mesh
 
 
-def _tile_decks(bridges, cells, tx, ty):
-    """[(xy (k, 2), z (k,), width)] of the bridge decks over road tile (tx, ty) (the buildings they run through get a way:
-    buildings.road_tile_items), [] without bridge profiles."""
-    if bridges is None:
-        return []
+def _tile_decks(bridges, cells, tx, ty, tunnels=None):
+    """[(xy (k, 2), z (k,), width, [clearance])] of the bridge decks and tunnel corridors over road tile (tx, ty)
+    (the buildings they run through get a way: buildings.road_tile_items), [] without bridge or tunnel profiles."""
+    out = []
+    if bridges is None and tunnels is None:
+        return out
     import roads as roadsmod
     x0, y0, x1, y1 = roadsmod.tile_bbox(tx, ty)
-    try:
-        return [(np.asarray(xy, np.float64)[:, :2], np.asarray(z, np.float64),
-                 float(getattr(spec, "width", 11.0) or 11.0))
-                for _, spec, xy, z, _ in bridges.parts(cells, (x0 - 20, y0 - 20, x1 + 20, y1 + 20))]
-    except Exception as e:      # no ways cut rather than no buildings
-        log.debug("tile decks: %s: %s", type(e).__name__, e)
-        return []
+    box = (x0 - 20, y0 - 20, x1 + 20, y1 + 20)
+    if bridges is not None:
+        try:
+            for _, spec, xy, z, _ in bridges.parts(cells, box):
+                w = float(getattr(spec, "width", 11.0) or 11.0)
+                out.append((np.asarray(xy, np.float64)[:, :2], np.asarray(z, np.float64), w, 6.5))
+        except Exception as e:      # no ways cut rather than no buildings
+            log.debug("tile decks (bridges): %s: %s", type(e).__name__, e)
+    if tunnels is not None:
+        try:
+            for _, spec, xy, z, _ in tunnels.parts(cells, box):
+                if not np.isfinite(z).all():
+                    continue
+                w = float(getattr(spec, "width", 11.0) or 11.0) + 2.0
+                out.append((np.asarray(xy, np.float64)[:, :2], np.asarray(z, np.float64), w, 7.2))
+        except Exception as e:
+            log.debug("tile decks (tunnels): %s: %s", type(e).__name__, e)
+    return out
 
 
 def _open_tunnels(g, keep):

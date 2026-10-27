@@ -1420,7 +1420,7 @@ ROAD_CAP_OVER_M = 1.0   # ... and its portal face reaches at most this far over 
 TUNNEL_LOW_H = 3.6      # m: the lowest tube (floor to vault)
 
 
-def tunnel_profile(lines, ground_fn):
+def tunnel_profile(lines, ground_fn, end_fn=None):
     """Floor heights of chained tunnel parts (as deck_heights: polylines (k, 2), joined at their ends; the chain's
     ends are the portals, at the ground's height there). Straight between the portals, but at least TUNNEL_COVER
     under the ground over it (an underwater tunnel dips under the bed: Fort McHenry's portals are on land), falling
@@ -1428,8 +1428,9 @@ def tunnel_profile(lines, ground_fn):
     ground_fn(xy (m, 2)) -> heights."""
     if not lines:
         return []
-    straight = deck_heights(lines, ground_fn)
-    edges, ez, dist = _end_dists(lines, ground_fn)
+    end_z = end_fn if end_fn is not None else ground_fn
+    straight = deck_heights(lines, end_z)
+    edges, ez, dist = _end_dists(lines, end_z)
     allxy = np.concatenate([np.asarray(ln[:, :2], np.float64) for ln in lines])
     gz = np.asarray(ground_fn(allxy), np.float64)
     out, k = [], 0
@@ -2226,6 +2227,11 @@ class BridgeProfiles:
                 for ring in ground_parts(feats, i):
                     e, n = mapgeom.enu_xy(feats, self.frame, ring)
                     ground[(fid, "g")].append(np.stack([e, n], axis=1))
+            if (fid, "t") not in ground:
+                ground[(fid, "t")] = []
+                for ring in tunnel_parts(feats, i):
+                    e, n = mapgeom.enu_xy(feats, self.frame, ring)
+                    ground[(fid, "t")].append(np.stack([e, n], axis=1))
 
     def _resolve(self, start, pool, ground, loaded):
         """The chain of part `start` (keys), loading the cell at each loose end until closed."""
@@ -2584,8 +2590,22 @@ class TunnelProfiles(BridgeProfiles):
         gfn = self._raw_ground if self.raw is not None else self._ground
         out = []
         self._tls.staged = {}           # (committed by parts() right after, the rest dropped with the next solve)
-        for k in comp:
-            xy = np.asarray(pool[k][1], np.float64)
+        lines = [np.asarray(pool[k][1], np.float64) for k in comp]
+        end_fn = self._ends_ground if self.ends is not None else None
+        chain_floors = tunnel_profile(lines, gfn, end_fn) if len(lines) >= 1 else []
+
+        def nk(p):
+            return (round(float(p[0]) * 2), round(float(p[1]) * 2))
+        deg = {}
+        for xy in lines:
+            if len(xy) >= 2:
+                for p in (xy[0], xy[-1]):
+                    deg[nk(p)] = deg.get(nk(p), 0) + 1
+
+        for idx, k in enumerate(comp):
+            xy = lines[idx]
+            spec = pool[k][0]
+            is_rail = getattr(spec, "kind", None) == "rail" or getattr(spec, "cls", None) in RAIL_STYLE
             if len(xy) < 2:
                 out.append(np.full(len(xy), np.nan))
                 continue
@@ -2593,8 +2613,21 @@ class TunnelProfiles(BridgeProfiles):
             g = np.asarray(gfn(xy), np.float64)
             ge = np.asarray(self._ends_ground(xy[[0, -1]]), np.float64)
             g = g.copy()
-            g[0], g[-1] = ge[0], ge[-1]
+            if deg.get(nk(xy[0]), 0) == 1:
+                g[0] = ge[0]
+            elif idx < len(chain_floors) and np.isfinite(chain_floors[idx][0]):
+                g[0] = chain_floors[idx][0]
+            if deg.get(nk(xy[-1]), 0) == 1:
+                g[-1] = ge[-1]
+            elif idx < len(chain_floors) and np.isfinite(chain_floors[idx][-1]):
+                g[-1] = chain_floors[idx][-1]
+
             floor, kinds = tunnel_sections(s, g)
+            if is_rail:
+                if idx < len(chain_floors) and np.isfinite(chain_floors[idx]).all():
+                    floor = chain_floors[idx]
+                kinds[:] = 2
+
             secs, i = [], 0
             while i < len(kinds):
                 j = i
@@ -2607,12 +2640,14 @@ class TunnelProfiles(BridgeProfiles):
             cover = g - floor
             log.debug("tunnel %s: sections %s over %.0f m", k, secs, s[-1])
             subs = {}
+            is_chain_start = (deg.get(nk(xy[0]), 0) == 1)
+            is_chain_end = (deg.get(nk(xy[-1]), 0) == 1)
             for n, (a, b, kd) in enumerate(secs):
                 if kd == 0:
                     subs[n] = (0, None, None, None, None)
                     continue
                 th = roadmesh.TUNNEL_H
-                if kd == 1:
+                if kd == 1 and not is_rail:
                     c_ = cover[a:b + 1]
                     k0, k1 = int(len(c_) * 0.2), max(int(len(c_) * 0.8), int(len(c_) * 0.2) + 1)
                     base = float(np.percentile(c_[k0:k1], 20))
@@ -2628,7 +2663,9 @@ class TunnelProfiles(BridgeProfiles):
                 for near in (s[a:b + 1] <= s[a] + PORTAL_LOOK_M, s[a:b + 1] >= s[b] - PORTAL_LOOK_M):
                     cv = float(np.max(cover[a:b + 1][near])) if near.any() else th
                     ups.append(float(np.clip(cv + PORTAL_GROUND_M - th, PORTAL_UP_MIN, roadmesh.PORTAL_FRAME)))
-                mouths = (n == 0 or secs[n - 1][2] == 0, n == len(secs) - 1 or secs[n + 1][2] == 0)
+                m_start = is_chain_start if n == 0 else (secs[n - 1][2] == 0)
+                m_end = is_chain_end if n == len(secs) - 1 else (secs[n + 1][2] == 0)
+                mouths = (m_start, m_end)
                 caps = None
                 if kd == 1:
                     caps, ups = self._road_caps(xy[a:b + 1], floor[a:b + 1], th, ups, mouths, pool[k][0].width, ground)

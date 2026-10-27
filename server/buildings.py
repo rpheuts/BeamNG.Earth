@@ -1692,7 +1692,7 @@ ACROSS_W = 8.0              # m: a footprint at most this wide that a public roa
                             # walkway or canopy over it (GitHub #48: the 69th Street station's 3 m shelters stood across
                             # the Dan Ryan as brick walls; a road crossing one runs only its width inside it)
 THROUGH_CLASSES = {"motorway", "trunk", "primary", "secondary", "tertiary", "residential", "unclassified",
-                   "living_street"}
+                   "living_street", "rail", "light_rail", "subway", "tram", "standard_gauge", "narrow_gauge"}
 
 
 def tunnel_lines(frame, road_layers, x0, y0, margin=50.0, size=256.0):
@@ -1853,19 +1853,17 @@ def road_lines(frame, road_layers, x0, y0, margin=50.0, size=256.0):
         near = np.flatnonzero((bb[:, 2] - x0 >= -margin) & (bb[:, 0] - x0 <= size + margin)
                               & (bb[:, 3] - y0 >= -margin) & (bb[:, 1] - y0 <= size + margin))
         for i in near.tolist():
-            if str(cls[i]) not in THROUGH_CLASSES or roadsmod.level_ranges(f, i):
+            if str(cls[i]) not in THROUGH_CLASSES:
                 continue
-            a = f.coord_off[f.ring_off[f.part_off[i]]]
-            b = f.coord_off[f.ring_off[f.part_off[i + 1]]]
-            ll = f.lonlat[a:b]
-            if len(ll) < 2:
-                continue
-            e, n = mapgeom.enu_xy(f, frame, ll)
-            xy = np.stack([e - x0, n - y0], 1)
-            if xy[:, 0].max() < -margin or xy[:, 0].min() > size + margin or xy[:, 1].max() < -margin \
-                    or xy[:, 1].min() > size + margin:
-                continue
-            out.append(xy)
+            for ring in roadsmod.ground_parts(f, i):
+                if len(ring) < 2:
+                    continue
+                e, n = mapgeom.enu_xy(f, frame, ring)
+                xy = np.stack([e - x0, n - y0], 1)
+                if xy[:, 0].max() < -margin or xy[:, 0].min() > size + margin or xy[:, 1].max() < -margin \
+                        or xy[:, 1].min() > size + margin:
+                    continue
+                out.append(xy)
     return out
 
 
@@ -1909,6 +1907,7 @@ def _passages(rings, attrs, looks, mins, bridges_xy, decks=None, ground_at=None)
         return rings, attrs, looks, mins
     deck_zs = [d[1] for d in decks] if decks else None
     deck_ws = [float(d[2]) if len(d) >= 3 and d[2] is not None else PASSAGE_W for d in decks] if decks else [PASSAGE_W] * len(lines)
+    deck_cs = [float(d[3]) if len(d) >= 4 and d[3] is not None else PASSAGE_CLEAR for d in decks] if decks else None
     for ring, at, look, mh in zip(rings, attrs, looks, mins):
         bridge_own = bool(at.get("bridge_part") or at.get("bridge_masonry"))
         c = ring.mean(0)
@@ -1984,12 +1983,14 @@ def _passages(rings, attrs, looks, mins, bridges_xy, decks=None, ground_at=None)
                 clamped_h = min(top - mh if own else top, max(0.0, dh - 1.5 - mh if own else dh - 1.5))
                 R.append(ring), A.append(dict(at, height=clamped_h)), L.append(look), M.append(mh)
                 continue
-            if mh >= dh + PASSAGE_CLEAR:
+            clear_h = deck_cs[k] if deck_cs else (7.2 if at.get("portal") else PASSAGE_CLEAR)
+            if mh >= dh + clear_h:
                 R.append(ring), A.append(at), L.append(look), M.append(mh)
                 continue                            # over its way
-            low, cut = max(mh, dh - 1.5), dh + PASSAGE_CLEAR
+            low, cut = max(mh, dh - 1.5), dh + clear_h
         else:
-            low, cut = mh, mh + PASSAGE_H
+            clear_h = deck_cs[k] if deck_cs else (7.2 if at.get("portal") else PASSAGE_H)
+            low, cut = mh, mh + clear_h
         cut = min(cut, top)
         if low > mh + 0.5:                          # solid under the deck
             R.append(ring), A.append(dict(at, height=(low - mh) if own else low)), L.append(look), M.append(mh)
@@ -2798,7 +2799,8 @@ def road_tile_items(frame, tx, ty, md, ground, decks=None):
                           water_xy=water_rings(frame, [c.layers.get("water") for c in cds], x0, y0),
                           decks=[(np.asarray(d[0], np.float64)[:, :2] - [x0, y0],
                                   np.asarray(d[1], np.float64),
-                                  float(d[2]) if len(d) >= 3 and d[2] is not None else None)
+                                  float(d[2]) if len(d) >= 3 and d[2] is not None else None,
+                                  float(d[3]) if len(d) >= 4 and d[3] is not None else None)
                                  for d in decks] if decks else None)
 
 

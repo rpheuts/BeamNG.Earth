@@ -366,6 +366,8 @@ PIER_TAPER = 0.012      # its width grows this much per m down (each side)
 PIER_CAP_H = 1.2        # m of pier cap under the girders, as wide as the deck
 PIER_BENT_W = 16.0      # a deck wider than this stands on columns (a bent) rather than one wall
 PIER_COLUMN = 1.6       # m square columns of a bent
+TUNNEL_SHOULDER = 1.2   # m of concrete floor between the road's edge and the wall
+PORTAL_APRON_M = 3.5    # m of concrete apron extending past the portal mouth to bridge terrain holes
 
 
 def deck(chunks, origin, piers=(), context=(), beams=()):
@@ -409,7 +411,7 @@ def deck(chunks, origin, piers=(), context=(), beams=()):
         k = len(z)
         lat = left - right
         u = lat / np.maximum(np.hypot(lat[:, 0], lat[:, 1]), 1e-9)[:, None]     # unit left
-        wide = 0.0 if c.get("tunnel") else PARAPET_W
+        wide = TUNNEL_SHOULDER if c.get("tunnel") else PARAPET_W
         el, er = left + u * wide, right - u * wide                  # the slab's edges, past the road's
         L = np.c_[el, z] - origin
         R = np.c_[er, z] - origin
@@ -419,7 +421,28 @@ def deck(chunks, origin, piers=(), context=(), beams=()):
         quads(L, Lb, 0.0, 0.1, v, v, side, out_l)
         quads(R, Rb, 0.0, 0.1, v, v, side, -out_l)
         quads(Lb, Rb, 0.0, 1.0, v, v, side, np.array([0.0, 0.0, -1.0]))
-        if c.get("tunnel"):                     # a tunnel's floor: the slab alone
+        if c.get("tunnel"):                     # a tunnel's floor: the slab alone, with apron at portals
+            portal = c.get("portal") or (False, False)
+            mid_pts = (left + right) / 2
+            for at_end, is_port in enumerate(portal):
+                if not is_port or k < 2:
+                    continue
+                at = 0 if at_end == 0 else k - 1
+                nb = 1 if at_end == 0 else k - 2
+                d_out = mid_pts[at] - mid_pts[nb]
+                d_len = float(np.hypot(d_out[0], d_out[1]))
+                if d_len < 1e-6:
+                    continue
+                d = (d_out / d_len) * PORTAL_APRON_M
+                aL = L[at] + np.r_[d, 0.0]
+                aR = R[at] + np.r_[d, 0.0]
+                aLb = aL - [0, 0, DECK_DEPTH]
+                aRb = aR - [0, 0, DECK_DEPTH]
+                quads(np.array([L[at], aL]), np.array([R[at], aR]), 0.0, 1.0, np.array([0.0, 0.5]), np.array([0.0, 0.5]), side, np.array([0.0, 0.0, 1.0]))
+                quads(np.array([Lb[at], aLb]), np.array([Rb[at], aRb]), 0.0, 1.0, np.array([0.0, 0.5]), np.array([0.0, 0.5]), side, np.array([0.0, 0.0, -1.0]))
+                quads(np.array([L[at], aL]), np.array([Lb[at], aLb]), 0.0, 0.1, np.array([0.0, 0.5]), np.array([0.0, 0.5]), side, out_l[at])
+                quads(np.array([R[at], aR]), np.array([Rb[at], aRb]), 0.0, 0.1, np.array([0.0, 0.5]), np.array([0.0, 0.5]), side, -out_l[at])
+                quads(np.array([aL, aLb]), np.array([aR, aRb]), 0.0, 1.0, np.array([0.0, 0.1]), np.array([0.0, 0.1]), side, np.r_[d / PORTAL_APRON_M, 0.0])
             continue
         # girders under the slab
         half = float(np.median(np.hypot(lat[:, 0], lat[:, 1]))) / 2
@@ -453,7 +476,7 @@ def deck(chunks, origin, piers=(), context=(), beams=()):
                     quads(Ei, Ti, 0.0, 0.1, v[sl], v[sl], side, -o)         # road face
                     quads(Ti, To, 0.0, 0.05, v[sl], v[sl], side, np.array([0.0, 0.0, 1.0]))
                 i = j + 1
-    for p in _piers_clear(piers, rb):
+    for p in _piers_clear(piers, rb, chunks):
         _pier(p, origin, P, T, UV, M, side)
         nv = sum(len(a) for a in P)
     if len(beams):
@@ -511,23 +534,84 @@ def _beams(beams, origin, P, T, UV, M, mat):
     M.append(np.full(len(Tn), mat))
 
 
-def _piers_clear(piers, rb):
+def _piers_clear(piers, rb, chunks=()):
     """The piers that cross no other deck under their top: a pier of the Queensboro Bridge's upper roadway stood on
-    the ground through the lower one, across its lanes (the user, 2026-10-17: "objects blocking the bridge road")."""
-    if not piers or not rb:
-        return list(piers)
-    lines = [(((l + r) / 2), float(np.median(np.hypot(*(l - r).T))) / 2 + PARAPET_W, z) for (l, r, v, m, layer, z), c in rb
-             if not c.get("tunnel")]
+    the ground through the lower one, across its lanes (the user, 2026-10-17: "objects blocking the bridge road").
+    Also clear piers that intersect ground roads, railways, or tunnel envelopes under the bridge."""
+    if not piers:
+        return []
+    deck_lines = [(((l + r) / 2), float(np.median(np.hypot(*(l - r).T))) / 2 + PARAPET_W, z)
+                  for (l, r, v, m, layer, z), c in (rb or []) if not c.get("tunnel")]
+    ground_lines = []
+    tunnel_lines = []
+    for c in (chunks or ()):
+        n = np.asarray(c.get("n", []), np.float64)
+        if len(n) < 2 or n.shape[1] < 3:
+            continue
+        w = float(c.get("w", 0.0))
+        if c.get("tunnel"):
+            th = float(c.get("tunnel_h") or TUNNEL_H)
+            hw = w / 2 + TUNNEL_SHOULDER
+            tunnel_lines.append((n[:, :2], n[:, 2], hw, th))
+        elif not c.get("deck"):
+            if (layer_of(c) == "base" or c.get("m", "").startswith("rail_")) and w >= 2.0:
+                hw = w / 2
+                ground_lines.append((n[:, :2], n[:, 2], hw))
+    for (l, r, v, m, layer, z), c in (rb or []):
+        if c.get("tunnel"):
+            th = float(c.get("tunnel_h") or TUNNEL_H)
+            hw = float(np.median(np.hypot(*(l - r).T))) / 2 + TUNNEL_SHOULDER
+            mid = (l + r) / 2
+            tunnel_lines.append((mid, z, hw, th))
+
+    def _dist_to_line(q, mid, z):
+        if len(mid) < 2:
+            return np.inf, 0.0
+        ab = mid[1:] - mid[:-1]
+        l2 = (ab * ab).sum(axis=1)
+        valid = l2 > 1e-9
+        if not np.any(valid):
+            d0 = float(np.hypot(*(mid[0] - q)))
+            return d0, float(z[0])
+        ab = ab[valid]
+        l2 = l2[valid]
+        p0 = mid[:-1][valid]
+        z0 = z[:-1][valid]
+        z1 = z[1:][valid]
+        qa = q - p0
+        t = np.clip((qa * ab).sum(axis=1) / l2, 0.0, 1.0)
+        proj = p0 + t[:, None] * ab
+        d = np.hypot(*(q - proj).T)
+        k = int(np.argmin(d))
+        zk = float(z0[k] + t[k] * (z1[k] - z0[k]))
+        return float(d[k]), zk
+
     out = []
     for p in piers:
         x, y, ux, uy, zt, zb, width = p[:7]
         q = np.array([x, y])
-        reach = float(np.clip(0.7 * width, 2.5, 14.0)) / 2 + PIER_T
+        reach = max(float(np.clip(0.7 * width, 2.5, 14.0)) / 2 + PIER_T, width / 2 - 0.5)
         hit = False
-        for mid, hw, z in lines:
-            d = np.hypot(*(mid - q).T)
-            k = int(np.argmin(d))
-            if d[k] < hw + reach and z[k] < zt - 1.0:       # a deck below the pier's top, across its footprint
+        # 1. Other bridge decks underneath
+        for mid, hw, z in deck_lines:
+            d, zk = _dist_to_line(q, mid, z)
+            if d < hw + reach and zk < zt - 1.0:
+                hit = True
+                break
+        if hit:
+            continue
+        # 2. Tunnel envelopes underneath or intersected
+        for mid, z, hw, th in tunnel_lines:
+            d, zk = _dist_to_line(q, mid, z)
+            if d < hw + reach and zb <= zk + th + 1.0 and zt >= zk - 1.0:
+                hit = True
+                break
+        if hit:
+            continue
+        # 3. Ground roads or railways underneath
+        for mid, z, hw in ground_lines:
+            d, zk = _dist_to_line(q, mid, z)
+            if d < hw + reach and zb <= zk + 5.0 and zt >= zk - 0.5:
                 hit = True
                 break
         if not hit:

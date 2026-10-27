@@ -241,6 +241,30 @@ class BridgeLookTest(unittest.TestCase):
         self.assertAlmostEqual(P[:, 2].max(), 20.0)
         self.assertAlmostEqual(P[:, 2].min(), 20.0 - roadmesh.DECK_DEPTH)
 
+    def test_portal_apron_extends_past_mouth(self):
+        d = self.deck(0.0, "a")
+        d["tunnel"] = True
+        d["portal"] = [True, False]
+        P, T, UV, mats, M = roadmesh.deck([d], (0.0, 0.0, 0.0))
+        self.assertAlmostEqual(P[:, 0].min(), -roadmesh.PORTAL_APRON_M, places=2)
+
+    def test_piers_clear_ground_tracks_and_tunnels(self):
+        p = (25.0, 0.0, 1.0, 0.0, 17.8, 3.0, 8.0)
+        rail_chunk = {"m": "rail_track", "w": 4.5, "tl": 2.4, "p": 5,
+                      "n": [[25.0, -20.0, 4.0], [25.0, 20.0, 4.0]]}
+        cleared = roadmesh._piers_clear([p], [], [rail_chunk])
+        self.assertEqual(cleared, [], "pier on railway track cleared")
+
+        rail_far = {"m": "rail_track", "w": 4.5, "tl": 2.4, "p": 5,
+                    "n": [[50.0, -20.0, 4.0], [50.0, 20.0, 4.0]]}
+        kept = roadmesh._piers_clear([p], [], [rail_far])
+        self.assertEqual(len(kept), 1, "pier far from railway kept")
+
+        tunnel_chunk = {"m": "road_asphalt_2lane", "w": 8.0, "tunnel": True,
+                        "n": [[25.0, -20.0, 2.0], [25.0, 20.0, 2.0]]}
+        cleared_tun = roadmesh._piers_clear([p], [], [tunnel_chunk])
+        self.assertEqual(cleared_tun, [], "pier penetrating tunnel envelope cleared")
+
     def test_piers_reach_the_ground(self):
         p = (25.0, 0.0, 1.0, 0.0, 17.8, 3.0, 8.0)
         P, T, UV, mats, M = roadmesh.deck([], (0.0, 0.0, 0.0), [p])
